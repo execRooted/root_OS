@@ -2,26 +2,26 @@
 
 echo "=== Building root_OS by execRooted ==="
 
-# Create OS directory
+
 mkdir -p os
 
-# Build bootloader
+
 echo "Building bootloader..."
 nasm -f bin boot/boot.asm -o os/boot.bin
 
-# Build kernel
+
 echo "Building kernel..."
 nasm -f bin kernel/kernel.asm -o os/kernel.bin
 
-# Create disk image (1.44MB floppy size)
+
 echo "Creating disk image..."
 dd if=/dev/zero of=root_OS.img bs=512 count=2880
 
-# Copy bootloader to first sector
+
 echo "Installing bootloader..."
 dd if=os/boot.bin of=root_OS.img conv=notrunc
 
-# Copy kernel to second sector
+
 echo "Installing kernel..."
 dd if=os/kernel.bin of=root_OS.img bs=512 seek=1 conv=notrunc
 

@@ -332,7 +332,14 @@ execute_command:
     mov cx, si
     sub cx, bx
     dec cx
-    push si
+    mov di, si
+.skip_spaces:
+    cmp byte [di], ' '
+    jne .got_filename
+    inc di
+    jmp .skip_spaces
+.got_filename:
+    push di
     push bx
     push cx
     call write_file
@@ -465,9 +472,11 @@ create_file:
     
     
     add di, 32
-    mov dword [di], 0      
+    mov dword [di], 0
     add di, 4
-    mov dword [di], 0x9000 
+    mov ax, [free_mem]
+    mov [di], ax
+    add word [free_mem], 0x100
     
     mov si, file_created_msg
     call print_string
@@ -609,9 +618,9 @@ ping_ip:
 write_file:
     pusha
     mov bp, sp
-    mov si, [bp+18]
-    mov bx, [bp+20]
-    mov dx, [bp+22]
+    mov si, [bp+20]  ; filename
+    mov bx, [bp+18]  ; content pointer
+    mov dx, [bp+16]  ; length
     mov cx, 0
     mov di, file_entries
 .find_file:
@@ -627,28 +636,36 @@ write_file:
     jge .create_new
     jmp .find_file
 .create_new:
+    ; Create new file entry
     push di
-    call copy_string
+    call copy_string  ; copy filename to di
     pop di
     add di, 32
-    mov [di], dx
+    mov [di], dx      ; set size
     add di, 4
-    mov dword [di], 0x9000
+    mov ax, [free_mem]
+    mov [di], ax      ; set pointer
+    mov di, ax        ; di = memory location
     jmp .copy_content
 .found:
+    ; File exists, allocate new space for content
     add di, 32
-    mov [di], dx
+    mov [di], dx      ; update size
     add di, 4
-    mov di, [di]
+    mov ax, [free_mem]
+    mov [di], ax      ; update pointer to new location
+    mov di, ax        ; di = new memory location
 .copy_content:
-    mov si, bx
-    mov cx, dx
-    rep movsb
+    mov si, bx        ; source = content
+    mov cx, dx        ; count = length
+    rep movsb         ; copy content
+    mov byte [di], 0  ; null terminate
+    add word [free_mem], dx  ; update free memory
     popa
     ret
 
 
-welcome_msg db "root_OS v1.0 by execRooted - Type 'help' for commands", 0
+welcome_msg db "root_OS v2.0 by execRooted - Type 'help' for commands", 0
 prompt db "shell> ", 0
 
 
@@ -717,6 +734,8 @@ input_buffer times 64 db 0
 
 
 number_buffer times 16 db 0
+free_mem dw 0xA000
+
 
 
 times 5120-($-$$) db 0
