@@ -12,6 +12,7 @@ The current commands are:
 | `delete <filename>` | Delete a file |
 | `clear` | Clear the screen |
 | `show <filename>` | Display file contents |
+| `edit <filename> <content>` | Edit file text |
 | `ifconfig` | Show network interfaces |
 | `connect` | Connect to the internet |
 | `ping <ip>` | Ping an IP address |

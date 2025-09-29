@@ -74,11 +74,34 @@ print_newline:
 
 
 copy_string:
-.copy_loop:
+    .copy_loop:
     lodsb
     stosb
     cmp al, 0
     jne .copy_loop
+    ret
+
+
+trim_string:
+    push si
+    mov di, si
+.find_end:
+    cmp byte [di], 0
+    je .found_end
+    inc di
+    jmp .find_end
+.found_end:
+    dec di
+.trim_loop:
+    cmp di, si
+    jl .done_trim
+    cmp byte [di], ' '
+    jne .done_trim
+    mov byte [di], 0
+    dec di
+    jmp .trim_loop
+.done_trim:
+    pop si
     ret
 
 
@@ -187,11 +210,6 @@ execute_command:
     je .clear_screen
 
     
-    mov di, cmd_show
-    call compare_string
-    je .show_file
-
-    
     mov di, cmd_shutdown
     call compare_string
     je .shutdown
@@ -215,6 +233,14 @@ execute_command:
     call compare_string
     je .echo_command
 
+    mov di, cmd_show
+    call compare_string
+    je .show_file
+
+    mov di, cmd_edit
+    call compare_string
+    je .edit_file
+
     mov si, unknown_msg
     call print_string
     ret
@@ -232,12 +258,13 @@ execute_command:
     ret
 
 .make_file:
-    
+
     add si, 5
     cmp byte [si], 0
     je .make_no_name
-    
-    
+
+    call trim_string
+
     call create_file
     ret
 
@@ -276,20 +303,6 @@ execute_command:
     int 0x10
     ret
 
-.show_file:
-    
-    add si, 5
-    cmp byte [si], 0
-    je .show_no_name
-
-    
-    call show_file
-    ret
-
-.show_no_name:
-    mov si, show_no_name_msg
-    call print_string
-    ret
 
 .shutdown:
     mov si, shutdown_msg
@@ -322,31 +335,48 @@ execute_command:
 
 .echo_command:
     add si, 5
-    mov bx, si
-.loop_find:
-    lodsb
-    cmp al, 0
-    je .no_redirect
-    cmp al, '>'
-    jne .loop_find
-    mov cx, si
-    sub cx, bx
-    dec cx
-    mov di, si
-.skip_spaces:
-    cmp byte [di], ' '
-    jne .got_filename
-    inc di
-    jmp .skip_spaces
-.got_filename:
-    push di
-    push bx
-    push cx
-    call write_file
-    add sp, 6
+    call print_string
     ret
-.no_redirect:
-    mov si, bx
+
+.show_file:
+    add si, 5
+    cmp byte [si], 0
+    je .show_no_name
+    call trim_string
+    call show_file
+    ret
+
+.show_no_name:
+    mov si, show_no_name_msg
+    call print_string
+    ret
+
+.edit_file:
+    add si, 5
+    cmp byte [si], 0
+    je .edit_no_name
+    call trim_string
+    mov di, si
+.find_space:
+    cmp byte [di], ' '
+    je .found_space
+    cmp byte [di], 0
+    je .edit_no_content
+    inc di
+    jmp .find_space
+.found_space:
+    mov byte [di], 0
+    inc di
+    call edit_file
+    ret
+
+.edit_no_name:
+    mov si, edit_no_name_msg
+    call print_string
+    ret
+
+.edit_no_content:
+    mov si, edit_no_content_msg
     call print_string
     ret
 
@@ -395,58 +425,6 @@ list_files:
     ret
 
 
-show_file:
-    mov cx, 0
-    mov di, file_entries
-.find_file:
-    push si
-    push di
-    call compare_string
-    pop di
-    pop si
-    je .found_file
-
-    add di, 64
-    inc cx
-    cmp cx, 16
-    jge .file_not_found
-
-    jmp .find_file
-
-.found_file:
-    
-    add di, 32
-    mov eax, [di]
-    cmp eax, 0
-    je .empty_file
-
-    
-    add di, 4
-    mov esi, [di]
-
-    
-.print_content:
-    mov al, [esi]
-    cmp al, 0
-    je .done_show
-    mov ah, 0x0E
-    int 0x10
-    inc esi
-    jmp .print_content
-
-.done_show:
-    call print_newline
-    ret
-
-.empty_file:
-    mov si, empty_file_msg
-    call print_string
-    ret
-
-.file_not_found:
-    mov si, file_not_found_msg
-    call print_string
-    ret
 
 
 create_file:
@@ -465,12 +443,15 @@ create_file:
     jmp .find_empty
 
 .found_empty:
-    
+
     push di
     call copy_string
     pop di
-    
-    
+
+    ; trim the stored filename
+    mov si, di
+    call trim_string
+
     add di, 32
     mov dword [di], 0
     add di, 4
@@ -518,6 +499,83 @@ delete_file:
     call print_string
     ret
 
+.file_not_found:
+    mov si, file_not_found_msg
+    call print_string
+    ret
+
+
+show_file:
+    mov cx, 0
+    mov di, file_entries
+.find_file:
+    push si
+    push di
+    call compare_string
+    pop di
+    pop si
+    je .found_file
+    add di, 64
+    inc cx
+    cmp cx, 16
+    jge .file_not_found
+    jmp .find_file
+.found_file:
+    mov bx, di
+    mov di, [bx+36]
+    mov cx, [bx+32]
+    cmp cx, 0
+    je .empty
+.print_loop:
+    mov al, [di]
+    cmp al, 0
+    je .done_print
+    mov ah, 0x0E
+    int 0x10
+    inc di
+    dec cx
+    jnz .print_loop
+.done_print:
+    call print_newline
+    ret
+.empty:
+    mov si, empty_file_msg
+    call print_string
+    ret
+.file_not_found:
+    mov si, file_not_found_msg
+    call print_string
+    ret
+
+
+edit_file:
+    mov cx, 0
+    mov bx, file_entries
+.find_file:
+    push si
+    push bx
+    call compare_string
+    pop bx
+    pop si
+    je .found_file
+    add bx, 64
+    inc cx
+    cmp cx, 16
+    jge .file_not_found
+    jmp .find_file
+.found_file:
+    push bx
+    mov si, di
+    mov di, [bx+36]
+    call copy_string
+    pop bx
+    mov ax, di
+    sub ax, [bx+36]
+    dec ax
+    mov [bx+32], ax
+    mov si, file_edited_msg
+    call print_string
+    ret
 .file_not_found:
     mov si, file_not_found_msg
     call print_string
@@ -615,54 +673,6 @@ ping_ip:
     call print_string
     ret
 
-write_file:
-    pusha
-    mov bp, sp
-    mov si, [bp+20]  ; filename
-    mov bx, [bp+18]  ; content pointer
-    mov dx, [bp+16]  ; length
-    mov cx, 0
-    mov di, file_entries
-.find_file:
-    push si
-    push di
-    call compare_string
-    pop di
-    pop si
-    je .found
-    add di, 64
-    inc cx
-    cmp cx, 16
-    jge .create_new
-    jmp .find_file
-.create_new:
-    ; Create new file entry
-    push di
-    call copy_string  ; copy filename to di
-    pop di
-    add di, 32
-    mov [di], dx      ; set size
-    add di, 4
-    mov ax, [free_mem]
-    mov [di], ax      ; set pointer
-    mov di, ax        ; di = memory location
-    jmp .copy_content
-.found:
-    ; File exists, allocate new space for content
-    add di, 32
-    mov [di], dx      ; update size
-    add di, 4
-    mov ax, [free_mem]
-    mov [di], ax      ; update pointer to new location
-    mov di, ax        ; di = new memory location
-.copy_content:
-    mov si, bx        ; source = content
-    mov cx, dx        ; count = length
-    rep movsb         ; copy content
-    mov byte [di], 0  ; null terminate
-    add word [free_mem], dx  ; update free memory
-    popa
-    ret
 
 
 welcome_msg db "root_OS v2.0 by execRooted - Type 'help' for commands", 0
@@ -674,12 +684,13 @@ cmd_list db "list", 0
 cmd_make db "make", 0
 cmd_delete db "delete", 0
 cmd_clear db "clear", 0
-cmd_show db "show", 0
 cmd_shutdown db "shutdown", 0
 cmd_ifconfig db "ifconfig", 0
 cmd_connect db "connect", 0
 cmd_ping db "ping", 0
 cmd_echo db "echo", 0
+cmd_show db "show", 0
+cmd_edit db "edit", 0
 
 
 file_boot_bin db "boot.bin", 0
@@ -687,17 +698,18 @@ file_kernel_bin db "kernel.bin", 0
 
 
 help_msg db "Available commands:", 0x0D, 0x0A
-         db "  help    - Show this help", 0x0D, 0x0A
-         db "  list    - List files", 0x0D, 0x0A
-         db "  make    - Create a file (make filename)", 0x0D, 0x0A
-         db "  delete  - Delete a file (delete filename)", 0x0D, 0x0A
-         db "  clear   - Clear screen", 0x0D, 0x0A
-         db "  show    - Show file content (show filename)", 0x0D, 0x0A
-         db "  ifconfig- Show network interfaces", 0x0D, 0x0A
-         db "  connect - Connect to internet", 0x0D, 0x0A
-         db "  ping    - Ping an IP address (ping ip)", 0x0D, 0x0A
-         db "  echo    - Print text or write to file (echo text > file)", 0x0D, 0x0A
-         db "  shutdown- Shutdown the system", 0x0D, 0x0A, 0
+          db "  help    - Show this help", 0x0D, 0x0A
+          db "  list    - List files", 0x0D, 0x0A
+          db "  make    - Create a file (make filename)", 0x0D, 0x0A
+          db "  delete  - Delete a file (delete filename)", 0x0D, 0x0A
+          db "  clear   - Clear screen", 0x0D, 0x0A
+          db "  ifconfig- Show network interfaces", 0x0D, 0x0A
+          db "  connect - Connect to internet", 0x0D, 0x0A
+          db "  ping    - Ping an IP address (ping ip)", 0x0D, 0x0A
+          db "  echo    - Print text", 0x0D, 0x0A
+          db "  show    - Display file contents (show filename)", 0x0D, 0x0A
+          db "  edit    - Edit file content (edit filename content)", 0x0D, 0x0A
+          db "  shutdown- Shutdown the system", 0x0D, 0x0A, 0
 
 list_header db "Files in OS directory:", 0
 list_footer db "--- End of file list ---", 0
@@ -711,7 +723,6 @@ make_no_name_msg db "Usage: make filename", 0x0D, 0x0A, 0
 delete_no_name_msg db "Usage: delete filename", 0x0D, 0x0A, 0
 unknown_msg db "Unknown command. Type 'help' for available commands.", 0x0D, 0x0A, 0
 
-show_no_name_msg db "Usage: show filename", 0x0D, 0x0A, 0
 empty_file_msg db "File is empty", 0x0D, 0x0A, 0
 shutdown_msg db "Shutting down root_OS by execRooted...", 0x0D, 0x0A, 0
 
@@ -725,6 +736,11 @@ ping_msg db "Pinging IP address...", 0x0D, 0x0A
          db "Reply from 10.0.2.2: time<1ms", 0x0D, 0x0A, 0
 
 ping_usage_msg db "Usage: ping ip_address", 0x0D, 0x0A, 0
+
+show_no_name_msg db "Usage: show filename", 0x0D, 0x0A, 0
+edit_no_name_msg db "Usage: edit filename content", 0x0D, 0x0A, 0
+edit_no_content_msg db "No content provided", 0x0D, 0x0A, 0
+file_edited_msg db "File edited successfully", 0x0D, 0x0A, 0
 
 
 file_entries times 1024 db 0
